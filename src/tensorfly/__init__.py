@@ -1,86 +1,56 @@
-"""TensorFly: MaleCNS-scale connectome inference scaffolding.
+"""TensorFly public API: real MaleCNS by default, synthetic only by opt-in."""
+from __future__ import annotations
 
-Notebook-facing API::
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-    from tensorfly import get_runtime, MaleCNSSimulation, SimulationConfig, run_benchmark
+import numpy as np
 
-    rt = get_runtime()                       # GPU detect + A100/L4/T4/CPU profile
-    sim = MaleCNSSimulation(SimulationConfig(num_neurons=5000, num_edges=20000))
-    sim.build()                              # synthetic scaffold unless real source given
-    result = run_benchmark(sim, steps=5, repeats=2)
-"""
+from .dataset import (DatasetPreparationError, MaleCNSDataset, download_selected_skeletons,
+                      export_viewer_morphology, prepare_malecns)
+from .inference import DEFAULT_PROMPTS, MODEL_9B, InferenceConfig, QwenInference
+from .populations import PopulationRegistry, build_population_registry
+from .simulation import ActivitySnapshot, MaleCNSSimulation, SimulationConfig
 
-from .benchmark import (
-    BenchmarkConfig,
-    BenchmarkResult,
-    compare_configs,
-    run_benchmark,
-    save_comparison,
-    time_inference,
-)
-from .inference import (
-    FALLBACK_MESSAGE,
-    MODEL_4B,
-    MODEL_9B,
-    InferenceConfig,
-    QwenInference,
-    get_default_model,
-    resolve_device,
-    resolve_dtype,
-    select_qwen_model,
-)
-from .replay import REPLAY_SCHEMA, ReplayRecorder
-from .runtime import (
-    PROFILES,
-    DeviceProfile,
-    GPUInfo,
-    Runtime,
-    SystemInfo,
-    detect_gpu,
-    detect_system,
-    get_runtime,
-    select_profile,
-)
-from .simulation import (
-    N_MALECNS_EDGES,
-    N_MALECNS_NEURONS,
-    ActivitySnapshot,
-    MaleCNSSimulation,
-    SimulationConfig,
-)
+
+@dataclass
+class PreparedTensorFly:
+    dataset: MaleCNSDataset
+    populations: PopulationRegistry
+    viewer_morphology: Path | None
+
+
+def prepare(cache_dir: str | Path | None = None, *, build_viewer: bool = True, synthetic_dev: bool = False) -> PreparedTensorFly:
+    """Prepare official data, auditable populations, and real viewer geometry.
+
+    The normal path is fail-closed and downloads Janelia sources itself.
+    ``synthetic_dev`` exists exclusively for tests/development.
+    """
+    dataset = prepare_malecns(cache_dir, synthetic_dev=synthetic_dev)
+    populations = build_population_registry(dataset)
+    viewer_path: Path | None = None
+    if build_viewer:
+        # Browser subset: every selected population if small; otherwise a
+        # deterministic evenly-spaced context-preserving cap per population.
+        def cap(values: np.ndarray, maximum: int = 256) -> np.ndarray:
+            return values if len(values) <= maximum else values[np.linspace(0, len(values) - 1, maximum, dtype=int)]
+        selected = np.unique(np.concatenate([cap(populations.sensory_body_ids), cap(populations.dopamine_body_ids), cap(populations.controller_body_ids)]))
+        context = dataset.body_ids[np.linspace(0, dataset.num_neurons - 1, min(256, dataset.num_neurons), dtype=int)]
+        selected = np.unique(np.concatenate([selected, context]))
+        skeleton_dir = download_selected_skeletons(selected, dataset.cache_dir)
+        labels = {str(int(value)): name for name, values in populations.body_ids.items() for value in values}
+        viewer_path = export_viewer_morphology(dataset, selected, skeleton_dir, Path("viewer") / "real-morphology.json", labels)
+    return PreparedTensorFly(dataset, populations, viewer_path)
+
+
+from .controller import NeuralReadout, SensoryEncoder, TensorFlyController
+from .experiment import TensorFlyExperiment, TrialRecord
+from .optimizer import ConfigurationSpace, RewardWeights, compute_reward
 
 __all__ = [
-    "PROFILES",
-    "DeviceProfile",
-    "GPUInfo",
-    "Runtime",
-    "SystemInfo",
-    "detect_gpu",
-    "detect_system",
-    "select_profile",
-    "get_runtime",
-    "N_MALECNS_NEURONS",
-    "N_MALECNS_EDGES",
-    "ActivitySnapshot",
-    "MaleCNSSimulation",
-    "SimulationConfig",
-    "BenchmarkConfig",
-    "BenchmarkResult",
-    "compare_configs",
-    "run_benchmark",
-    "save_comparison",
-    "time_inference",
-    "MODEL_9B",
-    "MODEL_4B",
-    "FALLBACK_MESSAGE",
-    "InferenceConfig",
-    "QwenInference",
-    "select_qwen_model",
-    "get_default_model",
-    "resolve_dtype",
-    "resolve_device",
-    "REPLAY_SCHEMA",
-    "ReplayRecorder",
+    "DEFAULT_PROMPTS", "MODEL_9B", "InferenceConfig", "QwenInference", "DatasetPreparationError", "MaleCNSDataset", "prepare_malecns", "prepare",
+    "PreparedTensorFly", "PopulationRegistry", "build_population_registry", "ActivitySnapshot", "MaleCNSSimulation", "SimulationConfig",
+    "SensoryEncoder", "NeuralReadout", "TensorFlyController", "TensorFlyExperiment", "TrialRecord", "ConfigurationSpace", "RewardWeights", "compute_reward",
 ]
-
-__version__ = "0.1.0"
+__version__ = "0.2.0"

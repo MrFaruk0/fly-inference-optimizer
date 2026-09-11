@@ -55,10 +55,10 @@ class DeviceProfile:
     name: str
     # Substrings matched (case-insensitive) against the detected GPU name.
     gpu_match: tuple[str, ...]
-    # Representative hardware VRAM in GB (for reference / batching decisions).
+    # Representative hardware VRAM in GB (for reference only).
     reference_vram_gb: float
-    # Notebook / inference knobs consumed by benchmark + simulation code.
-    batch_size: int
+    # Workload batch size is deliberately absent: it is a validated actual
+    # InferenceConfig knob, not a guessed GPU profile constant.
     dtype: str
     mixed_precision: bool
     num_workers: int
@@ -74,7 +74,6 @@ PROFILES: Dict[str, DeviceProfile] = {
         name="A100",
         gpu_match=("A100",),
         reference_vram_gb=40.0,
-        batch_size=1024,
         dtype="bfloat16",
         mixed_precision=True,
         num_workers=8,
@@ -85,7 +84,6 @@ PROFILES: Dict[str, DeviceProfile] = {
         name="L4",
         gpu_match=("L4",),
         reference_vram_gb=24.0,
-        batch_size=512,
         dtype="float16",
         mixed_precision=True,
         num_workers=4,
@@ -96,7 +94,6 @@ PROFILES: Dict[str, DeviceProfile] = {
         name="T4",
         gpu_match=("T4", "TESLA T4"),
         reference_vram_gb=16.0,
-        batch_size=256,
         dtype="float16",
         mixed_precision=True,
         num_workers=4,
@@ -107,7 +104,6 @@ PROFILES: Dict[str, DeviceProfile] = {
         name="CPU",
         gpu_match=(),
         reference_vram_gb=0.0,
-        batch_size=64,
         dtype="float32",
         mixed_precision=False,
         num_workers=2,
@@ -418,8 +414,7 @@ class Runtime:
             f"torch: {torch_ver}",
             (
                 f"profile: {self.profile.name} "
-                f"(dtype={self.profile.dtype}, "
-                f"batch_size={self.profile.batch_size})"
+                f"(dtype={self.profile.dtype}; batch size is selected by the experiment)"
             ),
             f"model: {model_id}",
             f"device: {self.device}",

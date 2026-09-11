@@ -1,87 +1,92 @@
-# TensorFly — MaleCNS-scale connectome inference on Colab
+# TensorFly
 
-TensorFly scaffolds MaleCNS-scale connectome simulation + Qwen inference benchmarking,
-with a standalone Three.js viewer for measured replays.
+TensorFly is an experimental closed-loop optimizer. It benchmarks
+`Qwen/Qwen3.5-9B`, encodes measured serving metrics into a simulation whose
+identities, connectivity, transmitter annotations and visible morphology come
+from MaleCNS v1.0, then uses an engineered neural readout to select the next
+real inference configuration.
 
-Start here: open **`TensorFly_Colab.ipynb`** in Colab and run top-to-bottom.
+> TensorFly uses reconstructed MaleCNS v1.0 anatomy, neuron identities,
+> morphology, and synaptic connectivity. Neural dynamics, inference-metric
+> encoding, reward modulation, plasticity, and the mapping from neural
+> activity to Qwen runtime actions are engineered experimental approximations.
 
-## Paid Colab profiles
+It does **not** claim that a fly brain understands or naturally optimizes
+Transformer inference. Connectivity `weight` is a synaptic contact count, not
+a calibrated electrophysiological conductance; transmitter-based effects are
+an engineered receptor-agnostic approximation.
 
-| Colab GPU | TensorFly profile | dtype | `batch_size` | Qwen model |
-|---|---|---|---|---|
-| A100 40/80GB | `A100` | bfloat16 | 1024 | `Qwen/Qwen3.5-9B` |
-| L4 24GB | `L4` | float16 | 512 | `Qwen/Qwen3.5-9B` |
-| T4 16GB | `T4` | float16 | 256 | `Qwen/Qwen3.5-4B` (fallback notice) |
-| CPU / other | `CPU` | float32 | 64 | `Qwen/Qwen3.5-4B` (fallback notice) |
+## Colab
 
-The notebook's startup cell prints GPU name, VRAM, system RAM, CUDA version,
-PyTorch version, profile, model, and device (`Runtime.startup_summary`).
+Open `TensorFly_Colab.ipynb` in a paid CUDA Colab runtime and run all cells.
+The normal path downloads, checksums and caches the official files itself—no
+manual upload or environment-variable data path:
 
-## Explicit fallback (printed, never silent)
+```python
+import tensorfly
 
-- Known name (`A100` / `L4` / `T4` substring) → that profile.
-- Unknown CUDA GPU name → prints
-  `[tensorfly.runtime] Unknown GPU ...` and uses the **`T4`** profile
-  (safe lowest-common GPU denominator).
-- No CUDA GPU → prints `[tensorfly.runtime] No CUDA GPU detected.`
-  and uses the **`CPU`** profile.
-- Qwen model: `A100`/`L4` with ≥ 20 GB VRAM (or unknown VRAM) → `Qwen/Qwen3.5-9B`;
-  anything else (`T4`/`CPU`/unknown/low VRAM) → `Qwen/Qwen3.5-4B` with the exact line:
-
-```text
-TensorFly fallback: Qwen3.5-4B because current GPU memory is insufficient for the 9B benchmark profile.
+tensorfly.prepare()
+experiment = tensorfly.TensorFlyExperiment(model="Qwen/Qwen3.5-9B")
+experiment.run(prompt_corpus=tensorfly.DEFAULT_PROMPTS, trials=20)
+experiment.compare_baselines()
+experiment.replay()
+experiment.export_video()
 ```
 
-## Real MaleCNS source requirement / honesty
+The initial preparation downloads approximately 1.1 GB of official source
+tables and needs a high-RAM Colab. Subsequent runs reuse checksum-verified
+sources and derived arrays. Qwen is deliberately lazy: importing or preparing
+the dataset never loads model weights.
 
-Full network target: **166,700 neurons / 25,600,000 edges** (MaleCNS v1.0).
+## Data provenance
 
-- Provide a real export via `MALECNS_EDGE_SOURCE`:
-  - `.npz` CSR dump (`row_ptr`/`col_idx`/`weights` or `indptr`/`indices`/`data`),
-    or edgelist arrays (`sources`/`targets`[, `weights`]);
-  - or `.csv` edgelist with `source,target[,weight]` header.
-- Pass it to `MaleCNSSimulation(config, edge_source=...)`.
-- Without it, `build()` creates a **synthetic scaffold** explicitly flagged
-  `is_synthetic=True`, `data_source="synthetic-scaffold (NOT real MaleCNS v1.0)"`.
-  A missing/unreadable path logs `missing-source` / `source-load-failed` and stays
-  synthetic. Synthetic output is only for memory/layout benchmarking — never
-  presented as real MaleCNS data.
+Normal execution is fail-closed. `prepare_malecns()` fetches the version-pinned
+Janelia bulk files, verifies the following byte counts and SHA-256 digests,
+and rejects missing, corrupt, or unprovenanced data:
 
-## Commands
+| Source | Bytes | SHA-256 |
+| --- | ---: | --- |
+| body annotations | 14,483,314 | `2177e246113e4cfbf1e7772ec37c6da1955ff22e8063d0b1f833101f99a9a3b2` |
+| body neurotransmitters | 43,282,834 | `95c9289220663abeb3409f3ad9e5a7f8a53f8093f5139d15502cd08da8879621` |
+| connectome weights | 1,051,241,946 | `e35da783d1c686b2b58b3b87cd6a403ae43bfcfba8bff28e08ef752c1a56afc1` |
 
-```bash
-# install (Colab cell 0 does this)
-pip install -e .[inference]
+The default retention policy is the documented fly-wirehead-compatible policy:
+nonempty `super_class`, excluding `Glia`, retaining every released directed
+edge between retained bodies. It produces exactly 166,700 neurons and
+25,582,938 directed edges for the official inputs. The preparation report
+records source/retained rows, exclusions, contact count, isolates, policy and
+source hashes. It preserves `uint64` biological body IDs and writes a sorted,
+reversible compact mapping alongside `pre_index`, `post_index`, and
+`synapse_count` arrays.
 
-# smoke benchmark (fast, runs automatically in the notebook)
-python -c "from tensorfly import *; s=MaleCNSSimulation(SimulationConfig(num_neurons=5000,num_edges=20000)); s.build(); print(run_benchmark(s, steps=5, repeats=2).to_dict())"
+The upstream source is [Janelia's MaleCNS v1.0 download page](https://male-cns.janelia.org/download/),
+which documents the [CC-BY licence](https://creativecommons.org/licenses/by/4.0/).
+The lock values and retention architecture are attributed to
+[`mattyhempstead/fly-wirehead`](https://github.com/mattyhempstead/fly-wirehead);
+TensorFly independently implements them rather than copying unlicensed code.
 
-# full-target build (gated; needs a high-RAM paid runtime + real source)
-export MALECNS_EDGE_SOURCE=/path/to/malecns_edges.npz
+Synthetic data is only available as `synthetic_dev=True` / `--synthetic-dev`
+for tests and developer diagnostics. It is never a fallback for normal runs.
 
-# serve the viewer (must be HTTP, not file://)
-python -m http.server 8000 --directory viewer
-# open http://localhost:8000/?replay=./tensorfly_replay.json
-```
+## Viewer and replay
 
-The notebook separates **benchmark mode** (`run_benchmark`, timed `sim.step()`
-loop; build excluded) from **viewer/replay mode** (`ReplayRecorder` snapshots
-→ `viewer/tensorfly_replay.json`). The full-target cell defines the memmap/cache
-build (`cache_dir="cache/malecns"`, `use_memmap=True`) but does not execute it
-unless `RUN_FULL_TARGET = True`.
+`prepare_malecns()` downloads selected official SWC skeleton objects, records
+their individual checksums, and converts them into
+`tensorfly-real-morphology/1`. The Three.js viewer uses typed
+`BufferGeometry` line segments built from those coordinates; it refuses
+synthetic/procedural geometry and keeps body IDs as strings in JavaScript to
+avoid `uint64` precision loss. Optional connection lines are emitted only from
+actual retained edges.
 
-## Video output workflow
+Replay frames are produced by the experiment log, not fabricated from spikes:
+they contain the recorded Qwen metrics, configuration transitions, and
+simulation activity keyed by real body ID.
 
-1. Generate `viewer/tensorfly_replay.json` (notebook section 6, real
-   simulation-derived activity).
-2. Serve `viewer/` and open `?replay=./tensorfly_replay.json`
-   (header flips from `SAMPLE SCAFFOLD · not measured` to
-   `LIVE REPLAY · measured snapshots`).
-3. Press **Record demo** (records `canvas.captureStream(60)` video + ~4 Hz
-   state JSON), then **Stop** → **Download Video** (`.webm`) /
-   **Download JSON** (reloadable `fly-cns-replay/1`).
-4. Optional MP4: set the endpoint field (or `window.__MP4_CONVERT_URL__`);
-   the viewer POSTs the WebM and downloads the MP4 response, keeping WebM
-   as fallback.
+## Fair experiment protocol
 
-See `viewer/README.md` for the replay schema, controls, and MP4 hook details.
+Every comparison uses the same model revision, prompt corpus, warmup,
+evaluation count and fixed `max_new_tokens`. The reported methods are fixed
+default configuration, seeded random search, hill climbing and TensorFly.
+TTFT is timestamped at the first generated token; it is not total generation
+time. Prefill uses a full prompt forward pass, decode/TPOT excludes first-token
+time, and CUDA peak allocated/reserved memory is sampled after synchronization.
