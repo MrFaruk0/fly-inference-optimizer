@@ -189,7 +189,9 @@ class TensorFlyExperiment:
             raise ValueError("real sensory encoder and controller/readout are required")
         self.sensory_encoder = sensory_encoder
         self.controller = controller
-        self.dopamine_indices = tuple(int(i) for i in (dopamine_indices or ()))
+        self.dopamine_indices = tuple(
+            int(i) for i in (() if dopamine_indices is None else dopamine_indices)
+        )
         if not self.dopamine_indices and not self.synthetic_dev:
             raise ValueError("real dopaminergic/modulatory indices are required")
         self.reward_weights = reward_weights or RewardWeights()

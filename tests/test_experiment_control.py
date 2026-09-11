@@ -84,6 +84,14 @@ def test_normal_mode_requires_real_population_indices():
         TensorFlyController([])
 
 
+def test_annotation_index_ndarrays_are_accepted():
+    """PopulationRegistry exposes uint arrays, not Python lists."""
+    encoder = SensoryEncoder(np.asarray([1, 3], dtype=np.uint32), num_neurons=4)
+    controller = TensorFlyController(np.asarray([2], dtype=np.uint32))
+    assert encoder.selected_indices == (1, 3)
+    assert controller.controller_indices == (2,)
+
+
 def test_reward_is_positive_for_improvement_and_negative_for_regression():
     baseline = {"ttft_ms": 100, "tpot_ms": 20, "throughput_tps": 10, "peak_allocated_vram_mb": 100, "peak_reserved_vram_mb": 120}
     improved = {"ttft_ms": 50, "tpot_ms": 10, "throughput_tps": 20, "peak_allocated_vram_mb": 50, "peak_reserved_vram_mb": 60}

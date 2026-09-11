@@ -88,7 +88,7 @@ class SensoryEncoder:
         metric_order: Sequence[str] = METRIC_ORDER,
         synthetic_dev: bool = False,
     ) -> None:
-        if not sensory_indices:
+        if sensory_indices is None or len(sensory_indices) == 0:
             if not synthetic_dev:
                 raise ValueError(
                     "real MaleCNS sensory body/internal indices are required; "
@@ -235,9 +235,11 @@ class TensorFlyController:
         min_batch_size: int = 1,
         max_batch_size: int = 16,
     ) -> None:
-        if not controller_indices and not synthetic_dev:
+        if (controller_indices is None or len(controller_indices) == 0) and not synthetic_dev:
             raise ValueError("real controller/readout indices are required")
-        self.controller_indices = tuple(int(i) for i in (controller_indices or ()))
+        self.controller_indices = tuple(
+            int(i) for i in (() if controller_indices is None else controller_indices)
+        )
         self.synthetic_dev = bool(synthetic_dev)
         self.min_batch_size = int(min_batch_size)
         self.max_batch_size = int(max_batch_size)
