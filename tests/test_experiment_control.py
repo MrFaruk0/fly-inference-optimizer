@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from tensorfly.controller import SensoryEncoder, TensorFlyController
+from tensorfly.dataset import MaleCNSDataset
 from tensorfly.experiment import TensorFlyExperiment
 from tensorfly.optimizer import compute_reward
 
@@ -117,6 +118,34 @@ def test_baselines_use_the_same_notebook_default_config():
     )
     assert set(rows) == {"default", "random", "hill_climbing", "tensorfly"}
     assert all(len(result) == 1 for result in rows.values())
+
+
+def test_notebook_default_api_runs_without_explicit_config_or_injection(monkeypatch, tmp_path):
+    """The exact ``TensorFlyExperiment(model=...)`` notebook contract."""
+    ids = np.asarray([17, 23, 47, 89], dtype=np.uint64)
+    dataset = MaleCNSDataset(
+        ids, np.asarray([0, 1, 2], dtype=np.uint32), np.asarray([1, 2, 3], dtype=np.uint32),
+        np.asarray([2, 2, 2], dtype=np.uint32),
+        [
+            {"body_id": 17, "superclass": "sensory", "type": "R7", "neurotransmitter": "acetylcholine"},
+            {"body_id": 23, "superclass": "central", "type": "PAM11", "neurotransmitter": "dopamine"},
+            {"body_id": 47, "superclass": "descending", "type": "DNa02", "neurotransmitter": "acetylcholine"},
+            {"body_id": 89, "superclass": "central", "type": "other", "neurotransmitter": "gaba"},
+        ], [], {"release": "MaleCNS v1.0", "retention_policy": "fixture", "synthetic_dev": False}, tmp_path,
+    )
+    monkeypatch.setattr("tensorfly.dataset.prepare_malecns", lambda *args, **kwargs: dataset)
+
+    class FakeQwen:
+        def __init__(self, config): self.config = config
+        def benchmark(self, prompts, warmup=1):
+            return [{"ttft_ms": 100.0, "tpot_ms": 10.0, "throughput_tps": 20.0,
+                     "peak_allocated_bytes": 1000, "peak_reserved_bytes": 1200}]
+
+    monkeypatch.setattr("tensorfly.inference.QwenInference", FakeQwen)
+    experiment = TensorFlyExperiment(model="Qwen/Qwen3.5-9B")
+    records = experiment.run(prompt_corpus=["a", "b", "c", "d"], trials=1)
+    baselines = experiment.compare_baselines(prompt_corpus=["a", "b", "c", "d"], trials=1)
+    assert len(records) == 1 and set(baselines) == {"default", "random", "hill_climbing", "tensorfly"}
 
 
 def test_synthetic_simulation_requires_explicit_developer_opt_in():
