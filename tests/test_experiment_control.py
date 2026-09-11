@@ -135,17 +135,22 @@ def test_notebook_default_api_runs_without_explicit_config_or_injection(monkeypa
     )
     monkeypatch.setattr("tensorfly.dataset.prepare_malecns", lambda *args, **kwargs: dataset)
 
+    created = []
     class FakeQwen:
-        def __init__(self, config): self.config = config
+        def __init__(self, config):
+            self.config = config
+            created.append(config)
         def benchmark(self, prompts, warmup=1):
             return [{"ttft_ms": 100.0, "tpot_ms": 10.0, "throughput_tps": 20.0,
                      "peak_allocated_bytes": 1000, "peak_reserved_bytes": 1200}]
 
     monkeypatch.setattr("tensorfly.inference.QwenInference", FakeQwen)
     experiment = TensorFlyExperiment(model="Qwen/Qwen3.5-9B")
-    records = experiment.run(prompt_corpus=["a", "b", "c", "d"], trials=1)
+    records = experiment.run(prompt_corpus=["a", "b", "c", "d"], trials=2)
+    assert len(created) == 1  # batch/cache changes do not reload a 9B model
     baselines = experiment.compare_baselines(prompt_corpus=["a", "b", "c", "d"], trials=1)
-    assert len(records) == 1 and set(baselines) == {"default", "random", "hill_climbing", "tensorfly"}
+    assert len(records) == 2 and set(baselines) == {"default", "random", "hill_climbing", "tensorfly"}
+    assert len(created) <= 4
 
 
 def test_synthetic_simulation_requires_explicit_developer_opt_in():

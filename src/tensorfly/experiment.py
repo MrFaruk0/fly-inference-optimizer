@@ -165,9 +165,28 @@ class TensorFlyExperiment:
             simulation_factory = lambda: MaleCNSSimulation(dataset, synthetic_dev=synthetic_dev)
         if benchmark is None:
             from .inference import InferenceConfig, QwenInference
+
+            # Batch size and use_cache are generation-time knobs. Reuse a
+            # loaded model when only those change; loading 9B weights for
+            # every trial would make an equal-budget comparison meaningless.
+            self._qwen_runner: Any | None = None
+            self._qwen_load_signature: tuple[Any, ...] | None = None
+
             def benchmark(*, config: Any, prompt_corpus: Sequence[str], max_new_tokens: int, warmup: int) -> Any:
                 effective = replace(config, max_new_tokens=max_new_tokens) if is_dataclass(config) else InferenceConfig(**{**dict(config), "max_new_tokens": max_new_tokens})
-                return QwenInference(effective).benchmark(prompt_corpus, warmup=warmup)
+                load_signature = (
+                    effective.model_id, effective.revision, effective.dtype,
+                    effective.device, effective.attn_implementation,
+                    effective.compile_model, effective.trust_remote_code,
+                )
+                if self._qwen_runner is None or self._qwen_load_signature != load_signature:
+                    self._qwen_runner = QwenInference(effective)
+                    self._qwen_load_signature = load_signature
+                else:
+                    # The existing loaded model is compatible; these actual
+                    # generation controls are read on every benchmark call.
+                    self._qwen_runner.config = effective
+                return self._qwen_runner.benchmark(prompt_corpus, warmup=warmup)
         if not callable(benchmark):
             raise TypeError("benchmark must be callable")
         self.synthetic_dev = bool(synthetic_dev)

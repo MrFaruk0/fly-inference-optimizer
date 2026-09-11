@@ -119,8 +119,11 @@ class ConfigurationSpace:
 
     batch_sizes: tuple[int, ...] = (1, 2, 4, 8)
     use_cache: tuple[bool, ...] = (True, False)
-    attention_implementations: tuple[str, ...] = ("sdpa", "eager")
-    torch_compile: tuple[bool, ...] = (False, True)
+    # Only expose knobs demonstrated by the benchmark path by default.
+    # Attention-kernel/compile candidates are opt-in after hardware-specific
+    # validation; they must not trigger costly speculative recompilation.
+    attention_implementations: tuple[str | None, ...] = (None,)
+    torch_compile: tuple[bool, ...] = (False,)
 
     def __post_init__(self) -> None:
         if not self.batch_sizes or any(int(x) <= 0 for x in self.batch_sizes):
@@ -160,11 +163,14 @@ class ConfigurationSpace:
 
     def deterministic_random(self, config: Any, rng: np.random.Generator) -> Any:
         """Generate a reproducible random-search candidate (explicit RNG)."""
+        attention = rng.choice(self.attention_implementations)
+        if hasattr(attention, "item"):
+            attention = attention.item()
         return self.candidate(
             config,
             batch_size=int(rng.choice(self.batch_sizes)),
             use_cache=bool(rng.choice(self.use_cache)),
-            attention_implementation=str(rng.choice(self.attention_implementations)),
+            attention_implementation=attention,
             torch_compile=bool(rng.choice(self.torch_compile)),
         )
 
