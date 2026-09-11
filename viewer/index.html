@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="MaleCNS 3D inference viewer — snapshot-driven Three.js visualization with batched buffers." />
+  <title>MaleCNS · Fly Inference Viewer</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#controls">Skip to playback controls</a>
+
+  <header class="topbar" role="banner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>MaleCNS <span class="muted">/ fly-inference-optimizer</span></h1>
+        <p class="subtitle" id="modelLine">No replay loaded — showing clearly-labeled sample scaffold.</p>
+      </div>
+    </div>
+    <div class="badges">
+      <span id="sourceBadge" class="badge badge-sample" role="status">SAMPLE&nbsp;SCAFFOLD · not measured</span>
+      <span id="recBadge" class="badge badge-rec" hidden>● REC <span id="recTime">00:00</span></span>
+      <span id="fpsBadge" class="badge badge-ghost" title="Render rate / neurons / draw calls">-- fps</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="viewport-wrap" aria-label="3D brain viewport">
+      <div id="viewport">
+        <canvas id="scene" aria-label="3D MaleCNS point-cloud viewport. Use orbit controls or preset camera buttons."></canvas>
+
+        <div class="vignette" aria-hidden="true"></div>
+        <div class="letterbox top" id="barTop" aria-hidden="true"></div>
+        <div class="letterbox bottom" id="barBottom" aria-hidden="true"></div>
+
+        <div id="loading" class="loading" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="loadingText">Initializing batched buffers…</span>
+        </div>
+
+        <div id="eventBanner" class="event-banner" hidden></div>
+
+        <!-- HUD -->
+        <div class="hud hud-tl glass" role="status" aria-label="Trial status">
+          <div class="hud-row"><span class="k">trial</span><strong id="hTrial">0 / 0</strong></div>
+          <div class="hud-row"><span class="k">tokens</span><strong id="hTokens">0</strong></div>
+          <div class="hud-row"><span class="k">time</span><strong id="hTime">0.0s</strong></div>
+          <div class="hud-progress"><div id="playProgress"></div></div>
+          <label class="scrub">
+            <span class="visually-hidden">Seek replay timeline</span>
+            <input id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek replay timeline" />
+          </label>
+        </div>
+
+        <div class="hud hud-tr glass" role="status" aria-label="Performance metrics">
+          <div class="hud-grid">
+            <div><span class="k">throughput</span><strong id="hTps">—</strong></div>
+            <div><span class="k">TTFT</span><strong id="hTtft">—</strong></div>
+            <div><span class="k">decode</span><strong id="hDecode">—</strong></div>
+            <div><span class="k">reward</span><strong id="hReward">—</strong></div>
+          </div>
+          <canvas id="spark" width="220" height="48" aria-label="Throughput and reward history chart" role="img"></canvas>
+          <div class="spark-legend"><i class="sw sw-tps"></i>tps <i class="sw sw-rew"></i>reward</div>
+        </div>
+
+        <div class="hud hud-bl glass" aria-label="Configuration">
+          <div class="hud-row"><span class="k">config</span><strong id="hConfig">scaffold-A</strong></div>
+          <div class="hud-row small"><span class="k">prompt</span><span id="hPrompt" class="prompt">sample scaffold — procedural activity</span></div>
+          <div class="hud-row small"><span class="k">best</span><span id="hBest">—</span></div>
+        </div>
+
+        <aside class="hud hud-br glass" aria-label="Configuration changes and best events">
+          <h2>events</h2>
+          <ol id="eventLog" class="event-log" aria-live="polite"></ol>
+        </aside>
+
+        <div class="legend glass" aria-label="Population legend">
+          <span><i class="dot dot-s"></i>sensory · fast flicker</span>
+          <span><i class="dot dot-d"></i>dopamine · slow broadcast</span>
+          <span><i class="dot dot-c"></i>controller · rhythmic bursts</span>
+        </div>
+      </div>
+
+      <div id="toast" class="toast" role="alert" aria-live="assertive" hidden></div>
+
+      <section id="controls" class="controls glass" aria-label="Playback and recording controls">
+        <div class="ctl-group" role="group" aria-label="Playback">
+          <button id="btnPlay" class="btn primary" aria-pressed="false" title="Play / pause [Space]">▶ Play</button>
+          <button id="btnReplay" class="btn" title="Restart from t=0 [R]">⟲ Replay</button>
+          <button id="btnResetView" class="btn" title="Reset camera [V]">⌖ Reset view</button>
+          <button id="btnCinematic" class="btn" aria-pressed="false" title="Toggle cinematic auto-orbit [C]">🎬 Cinematic</button>
+        </div>
+        <div class="ctl-group" role="group" aria-label="Camera presets">
+          <span class="k">view</span>
+          <button class="btn chip" data-preset="dorsal" title="Dorsal view [1]">Dorsal</button>
+          <button class="btn chip" data-preset="frontal" title="Frontal view [2]">Frontal</button>
+          <button class="btn chip" data-preset="lateral" title="Lateral view [3]">Lateral</button>
+          <button class="btn chip" data-preset="vnc" title="VNC close-up [4]">VNC</button>
+        </div>
+        <div class="ctl-group" role="group" aria-label="Speed">
+          <label class="k" for="speed">speed</label>
+          <select id="speed" class="select">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+        </div>
+        <div class="ctl-group" role="group" aria-label="Replay source">
+          <label class="btn file" for="fileInput" title="Load a replay JSON file from disk">⤒ Load file
+            <input id="fileInput" type="file" accept="application/json,.json" class="visually-hidden" />
+          </label>
+          <input id="urlInput" class="url" type="url" placeholder="replay URL …  (e.g. ./sample-replay.json)" aria-label="Replay JSON URL" />
+          <button id="btnLoadUrl" class="btn">Load URL</button>
+          <button id="btnSample" class="btn ghost" title="Regenerate the labeled procedural scaffold">Sample</button>
+        </div>
+        <div class="ctl-group" role="group" aria-label="Capture">
+          <button id="btnRecord" class="btn warn" title="Record canvas to WebM + collect deterministic replay states">● Record demo</button>
+          <button id="btnStop" class="btn" disabled title="Stop recording">■ Stop</button>
+          <button id="btnVideo" class="btn" disabled title="Download recorded WebM video">⬇ Video</button>
+          <button id="btnJSON" class="btn" disabled title="Download collected replay states as JSON">⬇ JSON</button>
+        </div>
+        <details class="mp4">
+          <summary>MP4 conversion hook (optional)</summary>
+          <div class="mp4-row">
+            <input id="mp4Url" class="url" type="url" placeholder="https://converter.example/convert (POSTs WebM, expects MP4)" aria-label="MP4 conversion endpoint URL" />
+            <button id="btnMp4" class="btn small" disabled>Convert last take to MP4</button>
+          </div>
+          <p class="hint">Browsers record WebM. If set, the last take is POSTed as <code>video/webm</code> and the response is downloaded. Otherwise WebM is the final artifact.</p>
+        </details>
+      </section>
+    </section>
+
+    <aside class="side glass" aria-label="Run details">
+      <h2>run</h2>
+      <dl class="kv">
+        <div><dt>model</dt><dd id="dModel">—</dd></div>
+        <div><dt>source</dt><dd id="dSource">sample scaffold</dd></div>
+        <div><dt>frames</dt><dd id="dFrames">—</dd></div>
+        <div><dt>duration</dt><dd id="dDur">—</dd></div>
+        <div><dt>neurons</dt><dd id="dNeurons">—</dd></div>
+        <div><dt>buffers</dt><dd>batched · 1 draw call / population</dd></div>
+      </dl>
+      <h2>config</h2>
+      <pre id="dConfig" class="config-dump" tabindex="0">{}</pre>
+      <p class="hint">Snapshot-driven: every visual value comes from the loaded replay frame (interpolated). The procedural fallback never claims to be measured — it is always badged <strong>SAMPLE&nbsp;SCAFFOLD</strong>.</p>
+      <p class="hint kbd-hint">keys: <kbd>Space</kbd> play · <kbd>R</kbd> replay · <kbd>V</kbd> reset view · <kbd>C</kbd> cinematic · <kbd>1–4</kbd> presets</p>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    <span>drag&nbsp;·&nbsp;orbit&nbsp;&nbsp;&nbsp;wheel&nbsp;·&nbsp;zoom&nbsp;&nbsp;&nbsp;right-drag&nbsp;·&nbsp;pan</span>
+    <span id="statusLine" role="status">ready</span>
+  </footer>
+
+  <div id="live" class="visually-hidden" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+cache/
+tmp/
+.tmp/
+viewer/__check_tmp.mjs
+viewer/tensorfly_replay.json
+tensorfly_replay.json
