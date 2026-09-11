@@ -199,10 +199,10 @@ class QwenInference:
         with torch.inference_mode():
             if cuda:
                 begin, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-                begin.record(); self._model(**inputs, use_cache=True); end.record()
+                begin.record(); self._model(**inputs, use_cache=self.config.use_cache); end.record()
                 prefill_ms = _cuda_elapsed_ms(torch, begin, end)
             else:  # developer diagnostic, never an accepted Colab result
-                began = perf_counter(); self._model(**inputs, use_cache=True); prefill_ms = (perf_counter() - began) * 1000.0
+                began = perf_counter(); self._model(**inputs, use_cache=self.config.use_cache); prefill_ms = (perf_counter() - began) * 1000.0
         streamer = _TokenTimingStreamer(prompt_tokens)
         generation_kwargs: Dict[str, Any] = {**inputs, "max_new_tokens": self.config.max_new_tokens, "do_sample": False, "use_cache": self.config.use_cache, "streamer": streamer}
         request_start = perf_counter()
