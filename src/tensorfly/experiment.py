@@ -400,7 +400,7 @@ class TensorFlyExperiment:
         self,
         *,
         prompt_corpus: Sequence[str],
-        config: Any,
+        config: Any | None = None,
         trials: int = 20,
         max_new_tokens: int | None = None,
         warmup: int = 1,
@@ -409,6 +409,8 @@ class TensorFlyExperiment:
         """Run default, random, hill-climbing, and TensorFly equally."""
         if not prompt_corpus:
             raise ValueError("prompt_corpus must not be empty")
+        if config is None:
+            config = self.default_config
         budget = int(max_new_tokens if max_new_tokens is not None else getattr(config, "max_new_tokens", config.get("max_new_tokens", 0) if isinstance(config, Mapping) else 0))
         initial_batch = int(getattr(config, "batch_size", config.get("batch_size", 1) if isinstance(config, Mapping) else 1))
         if len(prompt_corpus) % initial_batch:

@@ -111,6 +111,14 @@ def test_loop_changes_actual_config_and_replay_uses_recorded_metrics():
     assert all("simulation_state" in frame for frame in frames)
 
 
+def test_baselines_use_the_same_notebook_default_config():
+    rows = _experiment().compare_baselines(
+        prompt_corpus=["a", "b", "c", "d"], trials=1
+    )
+    assert set(rows) == {"default", "random", "hill_climbing", "tensorfly"}
+    assert all(len(result) == 1 for result in rows.values())
+
+
 def test_synthetic_simulation_requires_explicit_developer_opt_in():
     class Synthetic(FakeSimulation):
         is_synthetic = True
