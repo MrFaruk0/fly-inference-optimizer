@@ -71,6 +71,13 @@ def test_ttft_streamer_stops_on_first_generated_token_not_end():
     assert first == 1.0 and streamer.end_at == 9.0 and streamer.generated_tokens == 2
 
 
+def test_qwen_loader_uses_left_padding_and_current_dtype_keyword():
+    source = Path("src/tensorfly/inference.py").read_text(encoding="utf-8")
+    assert 'padding_side = "left"' in source
+    assert '"dtype": getattr(torch, self.config.dtype)' in source
+    assert '"torch_dtype": getattr(torch, self.config.dtype)' not in source
+
+
 def test_production_viewer_rejects_procedural_geometry():
     app = Path("viewer/app.js").read_text(encoding="utf-8")
     assert "Math.random" not in app and "Gaussian" not in app

@@ -140,13 +140,20 @@ class QwenInference:
         if self.config.revision:
             source_kwargs["revision"] = self.config.revision
         self._processor = processor_cls.from_pretrained(self.config.model_id, **source_kwargs)
+        # Decoder-only generation must use left padding.  AutoProcessor wraps
+        # a tokenizer for this checkpoint, so update both possible surfaces.
+        tokenizer = getattr(self._processor, "tokenizer", None)
+        if tokenizer is not None:
+            tokenizer.padding_side = "left"
+        if hasattr(self._processor, "padding_side"):
+            self._processor.padding_side = "left"
         model_cls = getattr(transformers, "AutoModelForMultimodalLM", None)
         # Text-only Qwen builds sometimes expose only this official fallback.
         if model_cls is None:
             model_cls = getattr(transformers, "AutoModelForCausalLM", None)
         if model_cls is None:
             raise RuntimeError("Installed transformers has no supported Qwen model loader.")
-        load_kwargs: Dict[str, Any] = {**source_kwargs, "torch_dtype": getattr(torch, self.config.dtype), "low_cpu_mem_usage": True}
+        load_kwargs: Dict[str, Any] = {**source_kwargs, "dtype": getattr(torch, self.config.dtype), "low_cpu_mem_usage": True}
         if self.config.attn_implementation:
             load_kwargs["attn_implementation"] = self.config.attn_implementation
         if self.config.device.startswith("cuda"):
