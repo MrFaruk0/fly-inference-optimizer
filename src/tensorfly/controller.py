@@ -256,13 +256,20 @@ class TensorFlyController:
         value = float(readout.value if isinstance(readout, NeuralReadout) else readout)
         current = int(config_value(config, "batch_size", self.min_batch_size))
         current = int(np.clip(current, self.min_batch_size, self.max_batch_size))
-        if value >= 0.66:
+        # These are real generation-time controls consumed by QwenInference;
+        # this is deliberately an engineered decoder, not an assertion about
+        # what the selected neurons biologically encode.
+        if value >= 0.80:
             target, action = min(self.max_batch_size, current + 1), "increase_batch_size"
-        elif value <= 0.33:
+            return _copy_with(config, batch_size=target), action
+        if value <= 0.20:
             target, action = max(self.min_batch_size, current - 1), "decrease_batch_size"
-        else:
-            target, action = current, "hold_batch_size"
-        return _copy_with(config, batch_size=target), action
+            return _copy_with(config, batch_size=target), action
+        if value >= 0.60:
+            return _copy_with(config, use_cache=True), "enable_kv_cache"
+        if value <= 0.40:
+            return _copy_with(config, use_cache=False), "disable_kv_cache"
+        return _copy_with(config, batch_size=current), "hold_configuration"
 
 
 __all__ = [

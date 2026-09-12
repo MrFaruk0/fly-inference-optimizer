@@ -14,6 +14,27 @@ from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional
 
 MODEL_9B = "Qwen/Qwen3.5-9B"
+MODEL_4B = "Qwen/Qwen3.5-4B"
+
+
+def select_qwen_model(
+    requested_model: str = MODEL_9B,
+    *,
+    vram_gb: float | None = None,
+) -> tuple[str, str | None]:
+    """Resolve the model without hiding a VRAM-driven fallback.
+
+    A 9B BF16 multimodal checkpoint is not a credible direct-load target on a
+    16 GB T4.  The caller receives an explicit notice which is persisted in
+    the experiment metadata and printed by the Colab notebook.
+    """
+    if requested_model != MODEL_9B or vram_gb is None or vram_gb >= 22.0:
+        return requested_model, None
+    return (
+        MODEL_4B,
+        f"Requested {MODEL_9B}, but detected {vram_gb:.1f} GB VRAM; "
+        f"using {MODEL_4B}. This is an explicit T4-class fallback, not a silent substitution.",
+    )
 
 
 @dataclass(frozen=True)
@@ -120,7 +141,19 @@ class QwenInference:
 
     @property
     def metadata(self) -> Dict[str, Any]:
-        return {**self.config.to_dict(), "loaded": self._model is not None}
+        metadata = {**self.config.to_dict(), "loaded": self._model is not None}
+        if self._torch is not None:
+            metadata["torch_version"] = str(getattr(self._torch, "__version__", "unknown"))
+            metadata["cuda_version"] = str(getattr(getattr(self._torch, "version", None), "cuda", None))
+            if self.config.device.startswith("cuda") and self._torch.cuda.is_available():
+                metadata["gpu"] = str(self._torch.cuda.get_device_name(0))
+                metadata["vram_bytes"] = int(self._torch.cuda.get_device_properties(0).total_memory)
+        try:
+            import transformers
+            metadata["transformers_version"] = str(transformers.__version__)
+        except ImportError:
+            pass
+        return metadata
 
     def load(self) -> "QwenInference":
         """Load only when the Colab user invokes the actual benchmark."""
@@ -167,7 +200,36 @@ class QwenInference:
 
     def _inputs(self, prompts: List[str]) -> Dict[str, Any]:
         assert self._processor is not None
-        payload = self._processor(text=prompts, return_tensors="pt", padding=self.config.padding_strategy == "longest")
+        # Qwen's current official example uses AutoProcessor plus a chat
+        # template.  Keeping the text-only benchmark in that documented path
+        # avoids treating this multimodal checkpoint as an arbitrary CausalLM.
+        if hasattr(self._processor, "apply_chat_template"):
+            messages = [
+                [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
+                for prompt in prompts
+            ]
+            try:
+                payload = self._processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                    padding=True,
+                )
+            except (TypeError, ValueError):
+                # Some released processor versions expose the documented
+                # single-conversation template only. Render every prompt with
+                # that same template, then batch the resulting text.
+                rendered = [
+                    self._processor.apply_chat_template(
+                        conversation, add_generation_prompt=True, tokenize=False
+                    )
+                    for conversation in messages
+                ]
+                payload = self._processor(text=rendered, return_tensors="pt", padding=True)
+        else:  # Compatibility fallback for a future processor surface.
+            payload = self._processor(text=prompts, return_tensors="pt", padding=True)
         return {key: value.to(self.config.device) if hasattr(value, "to") else value for key, value in dict(payload).items()}
 
     @staticmethod
@@ -206,8 +268,18 @@ class QwenInference:
         streamer = _TokenTimingStreamer(prompt_tokens)
         generation_kwargs: Dict[str, Any] = {**inputs, "max_new_tokens": self.config.max_new_tokens, "do_sample": False, "use_cache": self.config.use_cache, "streamer": streamer}
         request_start = perf_counter()
-        worker = Thread(target=self._model.generate, kwargs=generation_kwargs, daemon=True)
+        generation_error: list[BaseException] = []
+        def generate() -> None:
+            try:
+                self._model.generate(**generation_kwargs)
+            except BaseException as exc:  # surface worker failures to Colab
+                generation_error.append(exc)
+        worker = Thread(target=generate, daemon=True)
         worker.start(); worker.join()
+        if cuda:
+            torch.cuda.synchronize()
+        if generation_error:
+            raise RuntimeError("Qwen generation failed while measuring TTFT") from generation_error[0]
         request_end = streamer.end_at or perf_counter()
         if streamer.first_token_at is None or streamer.generated_tokens < 1:
             raise RuntimeError("Generation yielded no tokens; TTFT cannot be measured.")
@@ -219,12 +291,17 @@ class QwenInference:
         if cuda and record_memory:
             torch.cuda.synchronize()
             memory = {"peak_allocated_bytes": int(torch.cuda.max_memory_allocated()), "peak_reserved_bytes": int(torch.cuda.max_memory_reserved())}
-        return {
+        result = {
             "prefill_latency_ms": float(prefill_ms), "ttft_ms": float(ttft_ms), "decode_latency_ms": float(decode_ms), "tpot_ms": float(tpot_ms),
             "throughput_tps": float(streamer.generated_tokens / max(1e-9, end_to_end_ms / 1000.0)), "end_to_end_latency_ms": float(end_to_end_ms),
             "generated_tokens": int(streamer.generated_tokens), "prompt_tokens": int(prompt_tokens), "batch_size": self.config.batch_size,
-            "prompt_corpus_sha256": prompt_corpus_fingerprint(prompts), "config": self.config.to_dict(), **memory,
+            "prompt_corpus_sha256": prompt_corpus_fingerprint(prompts), "config": self.config.to_dict(),
+            "runtime": self.metadata, **memory,
         }
+        if memory["peak_allocated_bytes"] is not None:
+            result["peak_allocated_vram_mb"] = memory["peak_allocated_bytes"] / (1024.0 * 1024.0)
+            result["peak_reserved_vram_mb"] = memory["peak_reserved_bytes"] / (1024.0 * 1024.0)
+        return result
 
     def benchmark(self, prompts: Iterable[str], warmup: int = 1) -> List[Dict[str, Any]]:
         corpus = list(prompts)
@@ -236,4 +313,4 @@ class QwenInference:
         return [self.benchmark_batch(corpus[i : i + self.config.batch_size]) for i in range(0, len(corpus), self.config.batch_size)]
 
 
-__all__ = ["MODEL_9B", "DEFAULT_PROMPTS", "InferenceConfig", "QwenInference", "prompt_corpus_fingerprint"]
+__all__ = ["MODEL_9B", "MODEL_4B", "DEFAULT_PROMPTS", "InferenceConfig", "QwenInference", "prompt_corpus_fingerprint", "select_qwen_model"]

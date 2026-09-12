@@ -1,92 +1,77 @@
 # TensorFly
 
-TensorFly is an experimental closed-loop optimizer. It benchmarks
-`Qwen/Qwen3.5-9B`, encodes measured serving metrics into a simulation whose
-identities, connectivity, transmitter annotations and visible morphology come
-from MaleCNS v1.0, then uses an engineered neural readout to select the next
-real inference configuration.
+TensorFly is a Google Colab-first experiment asking whether an engineered controller operating on reconstructed MaleCNS v1.0 structure can select real runtime settings for `Qwen/Qwen3.5-9B`.
 
-> TensorFly uses reconstructed MaleCNS v1.0 anatomy, neuron identities,
-> morphology, and synaptic connectivity. Neural dynamics, inference-metric
-> encoding, reward modulation, plasticity, and the mapping from neural
-> activity to Qwen runtime actions are engineered experimental approximations.
+> TensorFly uses reconstructed MaleCNS v1.0 anatomy, neuron identities, morphology and structural connectivity. Neural dynamics, inference-metric encoding, reward modulation and mappings from neural activity to Qwen runtime actions are engineered experimental approximations.
 
-It does **not** claim that a fly brain understands or naturally optimizes
-Transformer inference. Connectivity `weight` is a synaptic contact count, not
-a calibrated electrophysiological conductance; transmitter-based effects are
-an engineered receptor-agnostic approximation.
+It does not claim a biologically complete fly brain, that a fly understands Qwen, or that measured fly dopamine/physiology optimizes Transformers.
 
-## Colab
+## Run in Colab
 
-Open `TensorFly_Colab.ipynb` in a paid CUDA Colab runtime and run all cells.
-The normal path downloads, checksums and caches the official files itself—no
-manual upload or environment-variable data path:
+Open [TensorFly_Colab.ipynb](TensorFly_Colab.ipynb) in a CUDA Google Colab runtime and use **Runtime → Run all**. There is no local desktop, Docker, Blender, neuVid, MuJoCo, Flybody, FlyGym, or NeuroMechFly dependency.
+
+The notebook clones this repository, installs current Hugging Face Transformers (Qwen3.5's documented requirement), reports GPU/RAM/Torch/CUDA, prepares MaleCNS, runs the experiment and baselines, serves the Three.js viewer, and exposes browser-native video capture.
+
+`Qwen/Qwen3.5-9B` is requested by default. A100 is the primary target, L4 is supported, and a T4 is supported with an explicit visible fallback to `Qwen/Qwen3.5-4B` when its 16 GB-class VRAM makes direct 9B loading impractical. The actual model ID, revision when supplied, dtype, GPU, VRAM, Torch, Transformers and CUDA are persisted in benchmark rows. No model substitution is silent.
 
 ```python
 import tensorfly
 
-tensorfly.prepare()
+prepared = tensorfly.prepare()  # official sources only; fail closed
 experiment = tensorfly.TensorFlyExperiment(model="Qwen/Qwen3.5-9B")
-experiment.run(prompt_corpus=tensorfly.DEFAULT_PROMPTS, trials=20)
-experiment.compare_baselines()
+results = experiment.run(prompt_corpus=tensorfly.DEFAULT_PROMPTS, trials=20)
+baselines = experiment.compare_baselines(prompt_corpus=tensorfly.DEFAULT_PROMPTS)
 experiment.replay()
-experiment.export_video()
+experiment.export_video()  # writes viewer/tensorfly_replay.json
 ```
 
-The initial preparation downloads approximately 1.1 GB of official source
-tables and needs a high-RAM Colab. Subsequent runs reuse checksum-verified
-sources and derived arrays. Qwen is deliberately lazy: importing or preparing
-the dataset never loads model weights.
+`export_video()` deliberately exports measured replay data rather than trying to render on the benchmark GPU. In the served viewer use **Cinematic Replay**, **Record Demo**, **Stop Recording**, and **Download Video**. It uses `canvas.captureStream()` and `MediaRecorder` to create `tensorfly_demo.webm`. Recording happens after Qwen measurements and cannot perturb them.
 
-## Data provenance
+## Biological data and provenance
 
-Normal execution is fail-closed. `prepare_malecns()` fetches the version-pinned
-Janelia bulk files, verifies the following byte counts and SHA-256 digests,
-and rejects missing, corrupt, or unprovenanced data:
+Normal preparation is fail-closed:
 
-| Source | Bytes | SHA-256 |
-| --- | ---: | --- |
-| body annotations | 14,483,314 | `2177e246113e4cfbf1e7772ec37c6da1955ff22e8063d0b1f833101f99a9a3b2` |
-| body neurotransmitters | 43,282,834 | `95c9289220663abeb3409f3ad9e5a7f8a53f8093f5139d15502cd08da8879621` |
-| connectome weights | 1,051,241,946 | `e35da783d1c686b2b58b3b87cd6a403ae43bfcfba8bff28e08ef752c1a56afc1` |
+```text
+cache → SHA-256 validation → otherwise official Janelia download
+      → schema/filter validation → real compact graph + manifest
+```
 
-The default retention policy is the documented fly-wirehead-compatible policy:
-nonempty `super_class`, excluding `Glia`, retaining every released directed
-edge between retained bodies. It produces exactly 166,700 neurons and
-25,582,938 directed edges for the official inputs. The preparation report
-records source/retained rows, exclusions, contact count, isolates, policy and
-source hashes. It preserves `uint64` biological body IDs and writes a sorted,
-reversible compact mapping alongside `pre_index`, `post_index`, and
-`synapse_count` arrays.
+The pinned [official MaleCNS v1.0 download release](https://male-cns.janelia.org/download/) supplies curated annotations, neurotransmitter predictions, the full weighted connectivity table, and selected body-ID-addressed SWC skeletons. The source is CC-BY. Source URL, exact byte count and SHA-256 are stored for each bulk table; selected skeleton object URL, size and SHA-256 are stored independently.
 
-The upstream source is [Janelia's MaleCNS v1.0 download page](https://male-cns.janelia.org/download/),
-which documents the [CC-BY licence](https://creativecommons.org/licenses/by/4.0/).
-The lock values and retention architecture are attributed to
-[`mattyhempstead/fly-wirehead`](https://github.com/mattyhempstead/fly-wirehead);
-TensorFly independently implements them rather than copying unlicensed code.
+The preparation manifest records the release, preprocessing version and time, source annotation/edge rows, retained neuron/edge/contact counts, exclusions, isolates, retention policy, and source hashes. The documented policy keeps nonempty, non-Glia superclass annotations and all released directed edges between those bodies. Its locked official result is exactly 166,700 retained neurons and 25,582,938 directed edges; it is not a rounded integrity check.
 
-Synthetic data is only available as `synthetic_dev=True` / `--synthetic-dev`
-for tests and developer diagnostics. It is never a fallback for normal runs.
+Biological body IDs remain `uint64` in Python. They are sorted into reversible compact graph indices, and the browser receives decimal strings so JavaScript never rounds them through `Number`.
 
-## Viewer and replay
+There is no automatic synthetic fallback. `prepare_malecns()` raises on a download, hash, schema, accounting, preprocessing, or source-load failure. `synthetic_dev=True` is an explicit tiny developer/test fixture only.
 
-`prepare_malecns()` downloads selected official SWC skeleton objects, records
-their individual checksums, and converts them into
-`tensorfly-real-morphology/1`. The Three.js viewer uses typed
-`BufferGeometry` line segments built from those coordinates; it refuses
-synthetic/procedural geometry and keeps body IDs as strings in JavaScript to
-avoid `uint64` precision loss. Optional connection lines are emitted only from
-actual retained edges.
+## Populations, simulation, and controller
 
-Replay frames are produced by the experiment log, not fabricated from spikes:
-they contain the recorded Qwen metrics, configuration transitions, and
-simulation activity keyed by real body ID.
+Sensory, dopaminergic/modulatory, and controller/readout registries are built from actual annotation fields and save both real body IDs and compact indices. The selection criteria and source transmitter metadata are written to `populations.json`; no positional graph slices are used. The explicit criteria select R1–R8/annotated sensory entries, dopamine/DA or PAM/PPL annotations, and named descending/motor cell types or superclass terms.
 
-## Fair experiment protocol
+The deterministic `SensoryEncoder` normalizes measured prefill latency, true TTFT, TPOT, throughput, allocated VRAM and reserved VRAM, then drives only resolved real sensory indices. An absent stimulus is exactly zero drive.
 
-Every comparison uses the same model revision, prompt corpus, warmup,
-evaluation count and fixed `max_new_tokens`. The reported methods are fixed
-default configuration, seeded random search, hill climbing and TensorFly.
-TTFT is timestamped at the first generated token; it is not total generation
-time. Prefill uses a full prompt forward pass, decode/TPOT excludes first-token
-time, and CUDA peak allocated/reserved memory is sampled after synchronization.
+```text
+InferenceConfig → measured Qwen benchmark → SensoryEncoder
+→ real MaleCNS graph/LIF approximation → real controller population readout
+→ actual next Qwen config → measured reward → real dopamine-population current
+```
+
+The action decoder can change actual generation-time batch size or KV-cache usage. Attention implementation and `torch.compile` are only exposed when a caller has validated them for the current hardware; they are not decorative metadata. Every trial stores input/next config, raw and normalized metrics, sensory drive, neural state, readout, modulatory target/current, action, reward, and fixed-workload signature.
+
+## Measurement and comparison
+
+The Qwen path uses the current official `AutoProcessor` + `AutoModelForMultimodalLM` loading surface, left padding, greedy generation, warmup, synchronization, CUDA events for prefill, and a first-generated-token streamer for true TTFT. It records prefill latency, TTFT, decode latency, TPOT, tokens/sec, end-to-end latency, generated-token count, and peak CUDA allocated/reserved memory. Visualization is not active while those timings are recorded.
+
+`compare_baselines()` gives fixed default, seeded random search, simple hill climbing and TensorFly the same model, prompt corpus, warmup, trial budget, and `max_new_tokens`. It reports all raw rows for best/median score, TTFT, TPOT, throughput, memory, and evaluations-to-best; it does not conceal a TensorFly loss.
+
+## Three.js replay
+
+`prepare()` selects a deterministic real-morphology subset in this order: sensory, dopamine, controller, then evenly spaced retained context bodies. It downloads official SWCs, performs source-vertex-only decimation while preserving branch ancestry, and writes `viewer/real-morphology.json`.
+
+The browser renders this subset in population batches using `BufferGeometry`, typed arrays, dynamic vertex colours, and additive blending. No production geometry, soma cloud, fibre, link, or activity is random or generated. Actual recorded activity, sensory current, and modulatory current are keyed by real body ID, so the matching real skeleton brightens. Camera movement is aesthetic; neural events are replayed recorded state.
+
+The independent [fly-connectome-template](https://github.com/cobanov/fly-connectome-template) was reviewed for browser replay/UI ideas but is not a dependency or copied code; TensorFly needs real skeletons and avoids inheriting its custom license. [AxonWeave](https://github.com/dhakalnirajan/axonweave) was evaluated as a potential substrate but is not required: its public description did not establish a Colab-verifiable, checksum-pinned official MaleCNS provisioning and morphology path matching this experiment. TensorFly therefore uses the smaller direct Janelia preparation layer. NAVis remains optional because the shipped SWC parser is sufficient.
+
+## Tests
+
+CI uses only small fixtures; it never downloads the 1.1 GB graph or Qwen. It covers fail-closed preparation, exact body-ID round trips, annotation-backed population selection, zero unstimulated drive, deterministic encoding, real config mutation, fixed workloads, true TTFT behavior, recorded replay metrics, and rejection of procedural/synthetic viewer anatomy.

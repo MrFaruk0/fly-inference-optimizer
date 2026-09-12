@@ -13,12 +13,14 @@ import os
 import tempfile
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 import numpy as np
 
 RELEASE = "MaleCNS v1.0"
+PREPROCESSING_VERSION = "tensorfly-malecns-prep/2"
 EXPECTED_RETAINED_NEURONS = 166_700
 EXPECTED_RETAINED_EDGES = 25_582_938
 SOURCE_SPECS: dict[str, dict[str, Any]] = {
@@ -394,6 +396,8 @@ def prepare_malecns(
     report = {
         "dataset_id": "malecns_v1",
         "release": RELEASE,
+        "preprocessing_version": PREPROCESSING_VERSION,
+        "preparation_timestamp": datetime.now(timezone.utc).isoformat(),
         "source_hashes": source_hashes,
         "source_annotation_rows": len(annotation_raw),
         "retained_neurons": int(body_ids.size),
@@ -434,6 +438,39 @@ def _parse_swc(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(coords, dtype=np.float32), parents
 
 
+def _simplify_swc(
+    coordinates: np.ndarray,
+    parents: np.ndarray,
+    *,
+    max_nodes: int = 1_500,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministically decimate a real SWC while preserving its branches.
+
+    All output vertices are selected source vertices.  Parent links are walked
+    to the nearest retained ancestor, so this reduces browser payload without
+    adding anatomical coordinates or procedural fibres.
+    """
+    if len(coordinates) <= max_nodes:
+        return coordinates, parents
+    children = np.bincount(np.maximum(parents, 0), minlength=len(coordinates))
+    mandatory = set(np.flatnonzero((parents < 0) | (children > 1)).tolist())
+    stride = max(1, int(np.ceil(len(coordinates) / max_nodes)))
+    keep = np.zeros(len(coordinates), dtype=bool)
+    keep[::stride] = True
+    keep[list(mandatory)] = True
+    # A pathological skeleton can have more branch points than the cap.  Do
+    # not discard a source branch merely to satisfy a display target.
+    kept = np.flatnonzero(keep)
+    old_to_new = {int(old): index for index, old in enumerate(kept)}
+    new_parents = np.full(len(kept), -1, dtype=np.int32)
+    for new_index, old_index in enumerate(kept):
+        ancestor = int(parents[old_index])
+        while ancestor >= 0 and ancestor not in old_to_new:
+            ancestor = int(parents[ancestor])
+        new_parents[new_index] = old_to_new.get(ancestor, -1)
+    return coordinates[kept], new_parents
+
+
 def prepare_skeleton_manifest(
     selected_body_ids: Iterable[int | str],
     skeleton_dir: str | Path,
@@ -451,13 +488,14 @@ def prepare_skeleton_manifest(
         if not path.exists():
             raise DatasetPreparationError(f"Missing official skeleton for body ID {int(body_id)}: {path}")
         coords, parent = _parse_swc(path)
+        coords, parent = _simplify_swc(coords, parent)
         chunks.append(coords)
         parents.append(parent)
         offsets.append(offsets[-1] + len(coords))
         entries.append({"body_id": str(int(body_id)), "path": path.name, "sha256": sha256_file(path), "coordinate_space": "MaleCNS EM, 8nm"})
     output = Path(output_path) if output_path is not None else root / "selected-skeletons.npz"
     _write_arrays_atomic(output, body_ids=ids, offsets=np.asarray(offsets, dtype=np.uint32), coordinates=np.concatenate(chunks), parent=np.concatenate(parents))
-    manifest = {"release": RELEASE, "source": SKELETON_SWCS_URI, "body_ids": [str(int(i)) for i in ids], "entries": entries, "geometry_is_source_derived": True, "procedural_geometry": False, "binary_path": str(output)}
+    manifest = {"release": RELEASE, "source": SKELETON_SWCS_URI, "body_ids": [str(int(i)) for i in ids], "entries": entries, "geometry_is_source_derived": True, "procedural_geometry": False, "simplification": "source-vertex decimation to ~1500 nodes/skeleton; parent links walk to retained ancestors", "binary_path": str(output)}
     _write_json_atomic(output.with_suffix(".json"), manifest)
     return manifest
 
@@ -519,4 +557,4 @@ def export_viewer_morphology(dataset: MaleCNSDataset, selected_body_ids: Iterabl
     return destination
 
 
-__all__ = ["RELEASE", "EXPECTED_RETAINED_NEURONS", "EXPECTED_RETAINED_EDGES", "SOURCE_SPECS", "SKELETON_SWCS_URI", "SKELETON_SWCS_HTTPS", "DatasetPreparationError", "MaleCNSDataset", "exact_ids", "sha256_file", "verify_source", "prepare_malecns", "prepare_skeleton_manifest", "download_selected_skeletons", "export_viewer_morphology"]
+__all__ = ["RELEASE", "PREPROCESSING_VERSION", "EXPECTED_RETAINED_NEURONS", "EXPECTED_RETAINED_EDGES", "SOURCE_SPECS", "SKELETON_SWCS_URI", "SKELETON_SWCS_HTTPS", "DatasetPreparationError", "MaleCNSDataset", "exact_ids", "sha256_file", "verify_source", "prepare_malecns", "prepare_skeleton_manifest", "download_selected_skeletons", "export_viewer_morphology"]

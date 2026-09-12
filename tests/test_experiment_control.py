@@ -106,18 +106,20 @@ def test_loop_changes_actual_config_and_replay_uses_recorded_metrics():
     records = experiment.run(prompt_corpus=["fixed prompt"], config=FakeConfig(), trials=3, max_new_tokens=4, warmup=1)
     assert len(records) == 3
     assert records[0].workload["prompt_corpus"] == ("fixed prompt",)
-    assert records[0].resulting_next_config["batch_size"] != records[0].input_config["batch_size"] or "fixed_for_complete_batch" in records[0].chosen_action or records[0].chosen_action == "hold_batch_size"
+    assert records[0].resulting_next_config != records[0].input_config or "fixed_for_complete_batch" in records[0].chosen_action or records[0].chosen_action == "hold_configuration"
     frames = experiment.replay()
     assert [frame["raw_inference_metrics"] for frame in frames] == [record.raw_inference_metrics for record in records]
     assert all("simulation_state" in frame for frame in frames)
 
 
 def test_baselines_use_the_same_notebook_default_config():
-    rows = _experiment().compare_baselines(
+    experiment = _experiment()
+    rows = experiment.compare_baselines(
         prompt_corpus=["a", "b", "c", "d"], trials=1
     )
     assert set(rows) == {"default", "random", "hill_climbing", "tensorfly"}
     assert all(len(result) == 1 for result in rows.values())
+    assert all("median_ttft_ms" in row for row in experiment.baseline_summary().values())
 
 
 def test_notebook_default_api_runs_without_explicit_config_or_injection(monkeypatch, tmp_path):

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from tensorfly.dataset import DatasetPreparationError, MaleCNSDataset, SOURCE_SPECS, prepare_malecns, verify_source
-from tensorfly.inference import _TokenTimingStreamer
+from tensorfly.inference import MODEL_4B, MODEL_9B, _TokenTimingStreamer, select_qwen_model
 from tensorfly.populations import build_population_registry
 from tensorfly.simulation import MaleCNSSimulation
 
@@ -29,6 +29,12 @@ def test_official_sources_are_pinned_and_large_graph_count_is_exact():
     assert len(SOURCE_SPECS["edges.feather"]["sha256"]) == 64
     from tensorfly.simulation import N_MALECNS_EDGES
     assert N_MALECNS_EDGES == 25_582_938
+
+
+def test_vram_fallback_is_explicit_not_silent():
+    assert select_qwen_model(MODEL_9B, vram_gb=40) == (MODEL_9B, None)
+    model, notice = select_qwen_model(MODEL_9B, vram_gb=16)
+    assert model == MODEL_4B and notice and "not a silent" in notice
 
 
 def test_hash_verification_is_fail_closed(tmp_path):
@@ -83,3 +89,5 @@ def test_production_viewer_rejects_procedural_geometry():
     assert "Math.random" not in app and "Gaussian" not in app
     assert "tensorfly-real-morphology/1" in app
     assert "String(id)" in app
+    assert "captureStream" in app and "MediaRecorder" in app
+    assert "BufferGeometry" in app and "DynamicDrawUsage" in app

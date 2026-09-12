@@ -103,7 +103,7 @@ class ReplayRecorder:
         prompt: str = "",
         populations: Optional[Dict[str, int]] = None,
         config: Optional[Dict[str, Any]] = None,
-        is_synthetic: bool = True,
+        is_synthetic: bool = False,
         data_source: Optional[str] = None,
         provenance: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -121,7 +121,7 @@ class ReplayRecorder:
         self.data_source: str = str(
             data_source
             if data_source is not None
-            else "synthetic-scaffold (NOT real MaleCNS v1.0)"
+            else "unprovenanced developer replay (rejected by the production viewer)"
         )
         self.provenance: Dict[str, Any] = dict(provenance or {})
         if "data_source" not in self.provenance:

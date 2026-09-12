@@ -1,13 +1,11 @@
 <!doctype html>
 <html lang="en"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="TensorFly viewer of checksum-verified real MaleCNS skeletons.">
-  <title>TensorFly · real MaleCNS morphology</title>
-  <link rel="stylesheet" href="./styles.css">
+  <meta name="description" content="TensorFly: source-derived MaleCNS morphology and measured Qwen replay.">
+  <title>TensorFly · MaleCNS replay</title><link rel="stylesheet" href="./styles.css">
   <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
-  <header><h1>TensorFly / MaleCNS v1.0</h1><p id="status">Loading checksum-verified morphology…</p></header>
-  <main><canvas id="c" aria-label="Real MaleCNS skeleton viewer"></canvas></main>
-  <footer>Real morphology only. Neural dynamics and visual activity are engineered experimental approximations.</footer>
-  <script type="module" src="./app.js"></script>
+  <header><div><h1>TENSORFLY <i>/</i> MALECNS v1.0</h1><p id="status">Loading source-derived morphology…</p></div><div class="controls"><button id="play">Pause Replay</button><button id="cinematic">Cinematic Replay</button><button id="reset">Reset View</button><button id="record">Record Demo</button><button id="stop" disabled>Stop Recording</button><a id="download" download="tensorfly_demo.webm" hidden>Download Video</a></div></header>
+  <main><canvas id="c" aria-label="Interactive real MaleCNS skeleton viewer"></canvas><aside id="metrics">Awaiting measured replay…</aside><input id="timeline" type="range" min="0" max="0" value="0" aria-label="Replay timeline"></main>
+  <footer>Real MaleCNS SWC morphology and recorded experiment state. Dynamics, metric encoding and control mapping are engineered approximations.</footer><script type="module" src="./app.js"></script>
 </body></html>

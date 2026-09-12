@@ -9,7 +9,7 @@ import numpy as np
 
 from .dataset import (DatasetPreparationError, MaleCNSDataset, download_selected_skeletons,
                       export_viewer_morphology, prepare_malecns)
-from .inference import DEFAULT_PROMPTS, MODEL_9B, InferenceConfig, QwenInference
+from .inference import DEFAULT_PROMPTS, MODEL_4B, MODEL_9B, InferenceConfig, QwenInference, select_qwen_model
 from .populations import PopulationRegistry, build_population_registry
 from .simulation import ActivitySnapshot, MaleCNSSimulation, SimulationConfig
 
@@ -49,7 +49,7 @@ from .experiment import TensorFlyExperiment, TrialRecord
 from .optimizer import ConfigurationSpace, RewardWeights, compute_reward
 
 __all__ = [
-    "DEFAULT_PROMPTS", "MODEL_9B", "InferenceConfig", "QwenInference", "DatasetPreparationError", "MaleCNSDataset", "prepare_malecns", "prepare",
+    "DEFAULT_PROMPTS", "MODEL_9B", "MODEL_4B", "select_qwen_model", "InferenceConfig", "QwenInference", "DatasetPreparationError", "MaleCNSDataset", "prepare_malecns", "prepare",
     "PreparedTensorFly", "PopulationRegistry", "build_population_registry", "ActivitySnapshot", "MaleCNSSimulation", "SimulationConfig",
     "SensoryEncoder", "NeuralReadout", "TensorFlyController", "TensorFlyExperiment", "TrialRecord", "ConfigurationSpace", "RewardWeights", "compute_reward",
 ]

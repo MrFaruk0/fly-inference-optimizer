@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -117,6 +118,7 @@ def _invoke_benchmark(
 
 @dataclass
 class TrialRecord:
+    timestamp_unix_s: float
     trial_index: int
     strategy: str
     input_config: dict[str, Any]
@@ -219,6 +221,7 @@ class TensorFlyExperiment:
             str(k): tuple(int(x) for x in v) for k, v in (population_body_ids or {}).items()
         }
         self.records: list[TrialRecord] = []
+        self.baseline_results: dict[str, list[TrialRecord]] = {}
         from .inference import InferenceConfig
         self.default_config = InferenceConfig(model_id=self.model, batch_size=2)
         self.metadata: dict[str, Any] = {
@@ -372,9 +375,14 @@ class TensorFlyExperiment:
             next_batch = int(getattr(next_config, "batch_size", next_config.get("batch_size", 1) if isinstance(next_config, Mapping) else 1))
             if len(prompt_corpus) % next_batch:
                 next_config, action = config, f"{action}_fixed_for_complete_batch"
+            # Reward is an engineered current *to the real resolved dopamine
+            # population*.  It is recorded separately from spikes: a
+            # sub-threshold reward is still a real injected experimental
+            # input, not a fabricated visual pulse.
             self._apply_dopamine(sim, reward_result.dopamine_current)
             state = self._snapshot(sim, snapshot)
             record = TrialRecord(
+                timestamp_unix_s=time.time(),
                 trial_index=index,
                 strategy=strategy,
                 input_config=input_config,
@@ -447,11 +455,35 @@ class TensorFlyExperiment:
                 rng=np.random.default_rng(seed) if strategy == "random" else None,
                 configuration_space=search_space,
             )
+        self.baseline_results = results
         self.records = [record for rows in results.values() for record in rows]
         return results
 
+    def baseline_summary(self) -> dict[str, dict[str, float | int]]:
+        """Summarize equal-budget runs without hiding individual raw rows."""
+        if not self.baseline_results:
+            raise RuntimeError("Run compare_baselines() before requesting its summary")
+        summary: dict[str, dict[str, float | int]] = {}
+        metric_names = ("ttft_ms", "tpot_ms", "throughput_tps", "peak_allocated_vram_mb", "peak_reserved_vram_mb")
+        for name, rows in self.baseline_results.items():
+            rewards = np.asarray([row.reward for row in rows], dtype=np.float64)
+            best_index = int(np.argmax(rewards))
+            result: dict[str, float | int] = {
+                "best_score": float(rewards[best_index]),
+                "median_score": float(np.median(rewards)),
+                "evaluations_to_best": best_index + 1,
+            }
+            for metric in metric_names:
+                values = [float(row.raw_inference_metrics[metric]) for row in rows if metric in row.raw_inference_metrics and isinstance(row.raw_inference_metrics[metric], (int, float))]
+                if values:
+                    result[f"median_{metric}"] = float(np.median(values))
+            summary[name] = result
+        return summary
+
     def replay(self, strategy: str | None = None) -> list[dict[str, Any]]:
         """Return frames made exclusively from recorded experiment rows."""
+        if strategy is None and any(record.strategy == "tensorfly" for record in self.records):
+            strategy = "tensorfly"
         selected = [r for r in self.records if strategy is None or r.strategy == strategy]
         return [_plain(asdict(record)) for record in selected]
 
@@ -465,13 +497,40 @@ class TensorFlyExperiment:
     def export_viewer_replay(self, path: str | Path = "viewer/tensorfly_replay.json", strategy: str | None = None) -> Path:
         """Write actual recorded metrics/states in the production-viewer schema."""
         destination = Path(path); destination.parent.mkdir(parents=True, exist_ok=True)
+        if strategy is None and any(record.strategy == "tensorfly" for record in self.records):
+            strategy = "tensorfly"
         rows = [record for record in self.records if strategy is None or record.strategy == strategy]
-        frames = [{
-            "trial": record.trial_index, "config": record.input_config,
-            "next_config": record.resulting_next_config, "chosen_action": record.chosen_action,
-            "reward": record.reward, "dopamine_modulatory_response": record.dopamine_modulatory_response,
-            **record.raw_inference_metrics, **record.simulation_state,
-        } for record in rows]
+        body_ids = self.population_body_ids
+        frames = []
+        for record in rows:
+            state = dict(record.simulation_state)
+            activity = dict(state.get("activity_by_body_id", {}))
+            modulatory = {
+                str(body_id): float(record.dopamine_modulatory_response)
+                for body_id in body_ids.get("dopamine", ())
+            }
+            sensory = {
+                str(body_id): float(record.normalized_sensory_encoding.get(
+                    self.sensory_encoder.metric_order[offset % len(self.sensory_encoder.metric_order)], 0.0
+                ))
+                for offset, body_id in enumerate(body_ids.get("sensory", ()))
+            }
+            frames.append({
+                "timestamp_unix_s": record.timestamp_unix_s,
+                "trial": record.trial_index, "config": record.input_config,
+                "next_config": record.resulting_next_config, "chosen_action": record.chosen_action,
+                "reward": record.reward, "dopamine_modulatory_response": record.dopamine_modulatory_response,
+                "activity_by_body_id": activity,
+                "sensory_drive_by_body_id": sensory,
+                "modulatory_drive_by_body_id": modulatory,
+                "events": {
+                    "sensory": {"body_ids": list(sensory), "encoding": record.normalized_sensory_encoding},
+                    "dopamine": {"body_ids": list(modulatory), "current": record.dopamine_modulatory_response},
+                    "controller": {"body_ids": [str(value) for value in body_ids.get("controller", ())], "readout": record.controller_readout},
+                    "configuration_change": {"action": record.chosen_action, "next_config": record.resulting_next_config},
+                },
+                **record.raw_inference_metrics, **state,
+            })
         payload = {"schema": "tensorfly-real-replay/1", "meta": {**_plain(self.metadata), "provenance": {"is_synthetic": self.synthetic_dev, "source": getattr(self.simulation, "data_source", "unknown")}}, "frames": frames}
         destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return destination
